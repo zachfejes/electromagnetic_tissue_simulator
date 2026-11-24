@@ -112,7 +112,13 @@ These are out of scope for v1. Most are listed under [Future ideas](#future-idea
 | D-37 | Repository layout as under [Architecture](#architecture). | Public headers separate from implementation; unit and validation tests separately runnable. |
 | D-38 | All unit and validation tests run on every PR and count toward coverage; validation uses coarse meshes. A nightly job on `main` runs full mesh-refinement studies and performance benchmarks. | Every PR proves accuracy cheaply; expensive checks still run daily. |
 | D-39 | CI runs in a pinned Docker image with GCC 13+, Clang 17+ and matching clang-tidy, clang-format and llvm-cov; the same image is available as a dev container. | A PR can't fail because a runner changed; local results match CI. |
-| D-40 | Naming: `PascalCase` types, `camelCase` functions and variables, leading underscore for private members (`_value`), `SCREAMING_CASE` for constants. clang-format uses LLVM style with a 100-column limit. Both are enforced by tooling. | Machine-checked, so style never comes up in review. |
+| D-40 | Naming: `PascalCase` types, `camelCase` functions and variables, trailing underscore for private members (`value_`), `SCREAMING_CASE` for constants. clang-format uses LLVM style with a 100-column limit. Both are enforced by tooling. | Machine-checked, so style never comes up in review. A trailing underscore can never collide with names the C++ standard reserves. |
+| D-41 | Enum values `PascalCase`; macros avoided, and where unavoidable `SCREAMING_CASE` with an `ETS_` prefix; namespaces lowercase; one main class per file, file named after it in `PascalCase` with `.hpp`/`.cpp`; files kept as brief as possible. | Short, single-class files make the file name an unambiguous pointer to the code. |
+| D-42 | Code-built geometry (FR-7.1) works by generating a Gmsh `.geo` script and running the `gmsh` program to produce the `.msh`. A tiny built-in mesh generator covers simple test shapes so unit tests don't need Gmsh. | Gmsh quality and exact surfaces without linking it (D-21). |
+| D-43 | The documentation gate (NFR-5.1) is its own CI job, `docs`, running Doxygen with warnings as errors. | A separate job makes a documentation failure obvious. |
+| D-44 | Renovate keeps pinned versions (CMake, Docker image, GitHub Actions) up to date; each update is a PR that must pass every gate. | Dependabot can't read CMake pins. |
+| D-45 | No outside contributions for now; `CONTRIBUTING.md` comes when the API stabilises. | A contribution process needs a stable API to contribute to. |
+| D-46 | Releases are 0.x at milestone boundaries, starting with 0.1 after milestone 3. 1.0 comes when FR-1 to FR-10 are implemented and validated; the API is then frozen under Semantic Versioning. | 0.x signals an unstable API; 1.0 marks all requirements met. |
 
 ## Physics & modelling
 
@@ -121,6 +127,8 @@ These are out of scope for v1. Most are listed under [Future ideas](#future-idea
 - Electrostatics (FR-3) and magnetostatics (FR-4).
 - Low-frequency (quasi-static) time-harmonic fields for FR-5 (D-2): eddy currents, inductive coupling and skin effect. Displacement currents and wave propagation are not modelled in v1.
 - Magnetostatics and eddy currents use the A–V formulation with a tree–cotree gauge (D-33).
+- **Why a gauge is needed.** Only B = ∇×A is physical, and ∇×(∇φ) = 0 for any scalar φ, so A + ∇φ gives the same field as A. With edge elements this makes the system matrix singular: every discrete gradient is a solution of the homogeneous problem.
+- **Tree–cotree gauge.** Treat the mesh's nodes and edges as a graph. A spanning tree connects every node with no loops; the remaining edges form the cotree, and each cotree edge closes exactly one loop with tree edges. Setting A = 0 on tree edges removes exactly the gradient freedom, because a nodal function is fully determined by its differences along tree edges. The cotree edges keep the physical content: the circulation of A around each loop, which equals the magnetic flux through it. The result is a unique A and a non-singular system, at the cost of building one spanning tree. The exact variant used with V in conductors is derived in the physics docs at milestone 5.
 - The domain is truncated by an air box with simple boundary conditions on its outer surface (D-34).
 
 ### Tissue models & material properties
@@ -182,6 +190,8 @@ Each library must be recommended, described and approved before use (D-6). Only 
 
 Tools and compiler features (not linked libraries): Gmsh (separate program, D-21), OpenMP (compiler feature, D-27), Doxygen (D-23), clang-tidy and clang-format (D-9), llvm-cov (D-7).
 
+Services: [Renovate](https://github.com/apps/renovate) for dependency update PRs (D-44), approved 2026-11-24.
+
 ## Environments
 
 - **CI**: GitHub Actions running in a pinned Docker image with GCC 13+, Clang 17+, clang-tidy, clang-format and llvm-cov (D-39).
@@ -206,17 +216,21 @@ Every pull request to `main` must pass these checks before it can merge (NFR-6).
 | `unit-tests` | Runs the full test suite, including the analytical benchmarks | Any test fails |
 | `coverage` | Runs the tests with Clang source-based coverage (D-7) | Line coverage or branch coverage is below 100% |
 | `lint` | Runs clang-tidy and checks formatting with clang-format (D-9) | Any issue is reported |
+| `docs` | Runs Doxygen with warnings as errors (D-43) | Any public item is undocumented, or any other Doxygen warning |
 
 - The coverage threshold is enforced inside the workflow, not by the ruleset. The ruleset only sees whether the `coverage` check passed.
 - Tests use GoogleTest. Unit and validation tests both run on every PR and count toward coverage (D-38).
 - Ruleset setup (**Settings → Rules → Rulesets**, targeting the default branch):
   - Require a pull request before merging, with 0 required approvals. PRs opened from Claude sessions are authored as the repo owner, who can't approve their own PR; the owner merging is the approval.
   - Restrict deletions and block force pushes.
-  - Require status checks to pass: `build-gcc`, `build-clang`, `unit-tests`, `coverage`, `lint`. Each job must have run at least once before GitHub offers it as a required check.
+  - Require status checks to pass: `build-gcc`, `build-clang`, `unit-tests`, `coverage`, `lint`, `docs`. Each job must have run at least once before GitHub offers it as a required check.
   - Optional: require branches to be up to date before merging.
   - Optional: require code scanning results (CodeQL). Needs a CodeQL workflow, and GitHub Advanced Security on a private repo.
 
 ### Dependency updates
+
+- Renovate opens a PR for each new version of a pinned dependency, the Docker image or a GitHub Action (D-44). Update PRs pass the same gates as any other change.
+- Any new library still needs explicit approval (D-6).
 
 ## Code style & conventions
 
@@ -226,9 +240,13 @@ Every pull request to `main` must pass these checks before it can merge (NFR-6).
 - Naming (D-40), enforced by clang-tidy's `readability-identifier-naming`:
   - types: `PascalCase`;
   - functions and variables: `camelCase`;
-  - private members: leading underscore, e.g. `_value`. The next character must be lowercase: an underscore followed by a capital letter is reserved by the C++ standard;
+  - private members: trailing underscore, e.g. `value_`;
+  - enum values: `PascalCase`, e.g. `ElementOrder::First`;
+  - namespaces: lowercase, e.g. `ets::physics`;
+  - macros: avoided; where unavoidable, `SCREAMING_CASE` with an `ETS_` prefix;
   - constants: `SCREAMING_CASE`.
 - Formatting: clang-format, LLVM style, 100-column limit (D-40).
+- Files: one main class per file, named after it in `PascalCase` (`TetrahedralMesh.hpp`, `TetrahedralMesh.cpp`), and kept as brief as possible (D-41).
 - SI units, documented on every parameter and return value (NFR-9).
 - Invalid input to the public API throws an exception (D-36).
 
@@ -237,6 +255,20 @@ Every pull request to `main` must pass these checks before it can merge (NFR-6).
 ### Copy and docs
 
 ## Milestones
+
+Each milestone is a set of PRs, each one test-first.
+
+0. **Foundations.** Copy and adapt the owner's `tdd` and `testing` skills; CMake skeleton; CI with all six gates; pinned Docker image and dev container; ruleset updated with the six required checks. No physics.
+1. **Mesh in, results out.** Read `.msh` v4.1 with physical groups; validate meshes against scenarios (D-35); write `.vtu`; tiny mesh generator for test shapes.
+2. **Materials.** Linear isotropic and anisotropic materials, with frequency and temperature dependence by formula or table.
+3. **Electrostatics.** Nodal FEM; validated against a charged sphere and a coaxial cable; capacitance. **Release 0.1.**
+4. **Steady current flow.** Conduction in conductors; resistance.
+5. **Magnetostatics.** Edge elements with a tree–cotree gauge; validated against an infinite wire and a current loop; inductance.
+6. **Eddy currents.** Time-harmonic A–V; fields over one period; frequency sweeps; impedance; power loss; validated against skin depth and a conducting sphere.
+7. **Simulator.** `ets-sim` with TOML scenarios; code-built geometry via Gmsh.
+8. **Performance.** Benchmarks toward one million unknowns; preconditioner decision (D-32).
+
+Releases: 0.x at milestone boundaries; 1.0 when FR-1 to FR-10 are implemented and validated (D-46).
 
 ## Open questions
 
