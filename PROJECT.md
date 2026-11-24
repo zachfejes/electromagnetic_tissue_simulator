@@ -21,13 +21,18 @@ Requirements are numbered so tests, issues and PRs can refer to them. Each will 
 - **FR-4. Steady-state magnetic fields.** The library computes the magnetic field for steady-state (DC) currents.
 - **FR-5. Dynamic fields.** The library computes electric and magnetic fields driven by time-varying circuits, using a low-frequency (quasi-static), time-harmonic formulation (see D-2), including:
   - **FR-5.1** at points throughout one period of a set frequency;
-  - **FR-5.2** across a frequency sweep.
+  - **FR-5.2** across a frequency sweep;
+  - **FR-5.3** driven by a prescribed voltage or current at conductor terminals, or by coils defined as a wire path carrying a current or as a wound region with a current density.
 - **FR-6. Material boundaries.** Fields are modelled correctly across boundaries between different materials.
 - **FR-7. Conductor geometry.** Users can specify the 3D geometry of a simulation:
   - **FR-7.1** by building it in code from primitives (e.g. wires, loops, boxes, cylinders) and combinations of them;
   - **FR-7.2** by importing an existing mesh.
-- **FR-8. Variable material properties.** A material's electrical and magnetic properties can vary with frequency and with temperature.
+- **FR-8. Variable material properties.** A material's electrical and magnetic properties can vary with frequency and with temperature:
+  - **FR-8.1** materials can be isotropic or anisotropic (a property tensor), and are linear;
+  - **FR-8.2** dependence on frequency and temperature can be given as a formula or as tabulated data with interpolation;
+  - **FR-8.3** temperature is an input, either a single value or a value per region; it is not computed.
 - **FR-9. Command-line simulator.** A command-line tool reads a scenario file (geometry, materials, sources, frequencies) and writes field results in a standard format viewable in ParaView (e.g. VTK).
+- **FR-10. Derived quantities.** Besides E, B, H and current density J, the library computes resistance, inductance, capacitance, impedance across a frequency sweep, and power loss density.
 
 **Non-functional requirements**
 
@@ -35,7 +40,9 @@ Requirements are numbered so tests, issues and PRs can refer to them. Each will 
 - **NFR-2. Consumable as a dependency.** Other projects can add the library as a dependency and call it.
 - **NFR-3. Layering.** The core math and physics code is a separate library from the simulator, with no dependency from the core on the simulator.
 - **NFR-4. Test-driven development.** All code is developed test-first, following the project's TDD and testing skills.
-- **NFR-5. Documentation.** Public classes and functions are documented.
+- **NFR-5. Documentation.** Every public class and function is documented, and the documentation explains the physics behind the code, not only what it does:
+  - **NFR-5.1** API docs are generated with Doxygen, and CI fails if any public item is undocumented;
+  - **NFR-5.2** physics code states the governing equations it implements (written in LaTeX, rendered by Doxygen) and how the code relates to them.
 - **NFR-6. Merge gates.** A pull request can merge to `main` only when CI shows:
   - **NFR-6.1** 100% line coverage;
   - **NFR-6.2** 100% branch coverage;
@@ -43,6 +50,9 @@ Requirements are numbered so tests, issues and PRs can refer to them. Each will 
   - **NFR-6.4** a build that compiles without issues.
 - **NFR-7. Verified accuracy.** Every physics feature is tested against known analytical solutions, each with a stated error tolerance and a check that the error shrinks as the mesh is refined.
 - **NFR-8. License.** The library is released under the Apache-2.0 license.
+- **NFR-9. Units.** The API uses SI units throughout, stored as `double`, with the unit documented on every parameter and return value.
+- **NFR-10. Problem size.** v1 handles problems of up to about one million unknowns on a single workstation, solved in minutes using multiple CPU threads. A benchmark suite tracks performance over time.
+- **NFR-11. Capabilities in release notes.** Every release states the element order(s) it supports, along with its other solver capabilities.
 
 ### Out of scope
 
@@ -54,6 +64,10 @@ These are out of scope for v1. Most are listed under [Future ideas](#future-idea
 - A graphical interface or interactive viewer.
 - Python bindings.
 - Writing our own mesher or general-purpose linear algebra.
+- Nonlinear materials (e.g. saturating iron cores).
+- Computing temperature (coupled electro-thermal or bioheat simulation).
+- Lumped circuit elements (resistors, capacitors, inductors) coupled to the field model.
+- Higher-order (curved) finite elements.
 
 ## Decisions
 
@@ -72,6 +86,17 @@ These are out of scope for v1. Most are listed under [Future ideas](#future-idea
 | D-11 | Accuracy is proven against analytical solutions with stated tolerances and mesh-convergence checks (NFR-7). | Makes "accurate" testable. |
 | D-12 | Apache-2.0 license. | Permissive, with an explicit patent grant. |
 | D-13 | No Python bindings in v1, but the C++ API is designed so they are easy to add. | Keeps v1 focused without closing the door. |
+| D-14 | The finite element method (FEM) on tetrahedral meshes: nodal elements for electrostatics and steady current flow, edge (Nédélec) elements for magnetostatics and eddy currents. | Handles mixed materials, material boundaries (FR-6) and arbitrary 3D geometry. Integral methods are weak with many materials; FDTD is full-wave and time-domain. |
+| D-15 | v1 uses first-order elements; interfaces leave room for higher orders. Each release notes the supported order (NFR-11). | Simplest to get correct and to cover fully with tests. |
+| D-16 | Temperature is an input in v1, not computed. | Coupled heating is a separate solver. |
+| D-17 | Materials are linear, isotropic or anisotropic; frequency and temperature dependence is a formula or interpolated table. | Anisotropy is needed for tissue and cheap to support early; nonlinear materials need an iterative outer loop. |
+| D-18 | v1 sources are prescribed terminal voltages or currents and coils (wire path or wound region). | Covers most low-frequency cases; lumped-circuit coupling is a large extra feature. |
+| D-19 | The library computes derived quantities (R, L, C, impedance, power loss density) as well as fields. | Usually what a researcher wants, and several have analytical benchmarks. |
+| D-20 | SI units, `double`, documented per parameter; no units library. | Avoids a dependency and compile-time cost. |
+| D-21 | Gmsh is used only as a separate tool. The library reads `.msh` v4.1 files itself and never links Gmsh. | Gmsh is GPL; linking it would conflict with Apache-2.0 (D-12). |
+| D-22 | Target: up to about one million unknowns on one workstation, in minutes, multithreaded, with a benchmark suite (NFR-10). | Realistic coils and layered geometries without a cluster; sets the linear-solver requirements. |
+| D-23 | API docs are generated with Doxygen; undocumented public items fail CI; physics code documents its governing equations (NFR-5). | Keeps "documented" from slipping, and explains why the code does what it does. |
+| D-24 | C++ namespace `ets`; CMake targets `ets::core`, `ets::physics`, `ets::solvers`; command-line tool `ets-sim`. | Short and consistent. |
 
 ## Physics & modelling
 
@@ -82,10 +107,13 @@ These are out of scope for v1. Most are listed under [Future ideas](#future-idea
 
 ### Tissue models & material properties
 
-- v1 materials are general: each has electrical and magnetic properties that may depend on frequency and temperature (FR-8).
+- v1 materials are general: each has electrical and magnetic properties that may depend on frequency and temperature (FR-8). Materials are linear and may be isotropic or anisotropic; dependence is given by a formula or an interpolated table (D-17). Temperature is an input (D-16).
 - Biological tissue (layered tissue, published tissue property data, dispersion models) is the eventual target and builds on this material model.
 
 ### Numerical methods
+
+- **Finite element method** on tetrahedral meshes (D-14), first-order elements in v1 (D-15).
+- **Why a volume mesh is always needed.** Scripted geometry and STEP files describe surfaces exactly, but the unknown fields exist throughout the volumes (inside conductors and in the surrounding media). FEM breaks each volume into tetrahedra and integrates over each one with numerical quadrature. The exact surfaces define where material regions meet, and the mesher places element faces on them. First-order tetrahedra approximate curved surfaces with flat facets; this geometric error shrinks as the mesh is refined, and higher-order (curved) elements remove most of it later.
 
 ### Validation & verification
 
@@ -94,8 +122,12 @@ These are out of scope for v1. Most are listed under [Future ideas](#future-idea
 
 ## Architecture
 
-- **Core libraries** (math, mesh, materials, physics, solvers): no dependency on the simulator (NFR-3).
-- **Simulator**: a command-line tool built on the core (FR-9).
+- **Core libraries** (namespace `ets`), with no dependency on the simulator (NFR-3):
+  - `ets::core`: math, mesh data structures and `.msh` reading;
+  - `ets::physics`: materials and field formulations;
+  - `ets::solvers`: assembly and linear solves.
+- **Simulator** `ets-sim`: a command-line tool built on the core (FR-9).
+- **Meshing**: Gmsh, run as a separate program (D-21).
 
 ## Technical plan
 
@@ -151,6 +183,10 @@ Every pull request to `main` must pass these checks before it can merge (NFR-6).
 ## Future ideas
 
 - Biological tissue: layered tissue models, published tissue property data, dispersion models.
+- Coupled electro-thermal and bioheat simulation (computed temperature).
+- Nonlinear materials.
+- Lumped circuit elements coupled to the field model.
+- Higher-order (curved) elements.
 - Full-wave electromagnetics and time-domain transient solves.
 - 2D and rotationally symmetric solvers for speed.
 - Python bindings (e.g. via nanobind).
