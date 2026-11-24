@@ -104,6 +104,15 @@ These are out of scope for v1. Most are listed under [Future ideas](#future-idea
 | D-29 | Semantic Versioning, with a `CHANGELOG.md` whose every release has a Capabilities section (element order, physics features, validated benchmarks). | Signals breaking changes to library users and satisfies NFR-11. |
 | D-30 | Doxygen docs, with equations rendered by MathJax, are published to GitHub Pages from `main`. | Equations are far easier to read rendered. |
 | D-31 | One short-lived branch per change (`feat/`, `fix/`, `docs/`, `chore/`), merged by squash. | One readable commit per change on `main`. |
+| D-32 | v1 starts with Eigen's built-in solvers (direct for small problems; preconditioned CG or BiCGSTAB for larger ones). Benchmarks measure progress toward NFR-10; a dedicated preconditioner (likely hypre's AMS) is proposed for approval only if the numbers call for it. | Start simple and measure before adding a dependency. |
+| D-33 | Magnetostatics and eddy currents use the A–V formulation (A on edges, V on conductor nodes) with a tree–cotree gauge. | Uniform treatment of any geometry, including coils with holes; the gauge keeps the system well-posed. |
+| D-34 | Open space is truncated with an air box and simple boundary conditions on its outer surface; a test shows the error falling as the box grows. | Simple, standard and testable; better open-boundary methods come later. |
+| D-35 | Gmsh physical group names link meshes to scenarios: volume groups name materials, surface groups name terminals and boundaries. Unnamed or unused groups are rejected with a clear error. | Readable meshes and scenarios; mismatches are caught before an expensive solve. |
+| D-36 | The public API throws exceptions for invalid input, with a message saying what is wrong and where. Inner numerical code assumes valid input and uses debug-build assertions. | Idiomatic C++; every `throw` is a branch the tests must cover. |
+| D-37 | Repository layout as under [Architecture](#architecture). | Public headers separate from implementation; unit and validation tests separately runnable. |
+| D-38 | All unit and validation tests run on every PR and count toward coverage; validation uses coarse meshes. A nightly job on `main` runs full mesh-refinement studies and performance benchmarks. | Every PR proves accuracy cheaply; expensive checks still run daily. |
+| D-39 | CI runs in a pinned Docker image with GCC 13+, Clang 17+ and matching clang-tidy, clang-format and llvm-cov; the same image is available as a dev container. | A PR can't fail because a runner changed; local results match CI. |
+| D-40 | Naming: `PascalCase` types, `camelCase` functions and variables, leading underscore for private members (`_value`), `SCREAMING_CASE` for constants. clang-format uses LLVM style with a 100-column limit. Both are enforced by tooling. | Machine-checked, so style never comes up in review. |
 
 ## Physics & modelling
 
@@ -111,6 +120,8 @@ These are out of scope for v1. Most are listed under [Future ideas](#future-idea
 
 - Electrostatics (FR-3) and magnetostatics (FR-4).
 - Low-frequency (quasi-static) time-harmonic fields for FR-5 (D-2): eddy currents, inductive coupling and skin effect. Displacement currents and wave propagation are not modelled in v1.
+- Magnetostatics and eddy currents use the A–V formulation with a tree–cotree gauge (D-33).
+- The domain is truncated by an air box with simple boundary conditions on its outer surface (D-34).
 
 ### Tissue models & material properties
 
@@ -120,12 +131,15 @@ These are out of scope for v1. Most are listed under [Future ideas](#future-idea
 ### Numerical methods
 
 - **Finite element method** on tetrahedral meshes (D-14), first-order elements in v1 (D-15).
+- **Linear solvers:** Eigen's built-in direct and iterative solvers to start; a dedicated preconditioner only if benchmarks show the need (D-32).
 - **Why a volume mesh is always needed.** Scripted geometry and STEP files describe surfaces exactly, but the unknown fields exist throughout the volumes (inside conductors and in the surrounding media). FEM breaks each volume into tetrahedra and integrates over each one with numerical quadrature. The exact surfaces define where material regions meet, and the mesher places element faces on them. First-order tetrahedra approximate curved surfaces with flat facets; this geometric error shrinks as the mesh is refined, and higher-order (curved) elements remove most of it later.
 
 ### Validation & verification
 
 - Every physics feature has tests against analytical solutions (NFR-7). Candidate benchmarks: charged sphere, coaxial cable, infinite straight wire, circular current loop, conducting sphere in an alternating field, skin depth in a conducting half-space.
 - Each benchmark states its error tolerance and checks that the error decreases as the mesh is refined.
+- A test shows the error caused by the air box falling as the box grows (D-34).
+- PRs run validation on coarse meshes; the nightly job runs full refinement studies (D-38).
 
 ## Architecture
 
@@ -134,7 +148,21 @@ These are out of scope for v1. Most are listed under [Future ideas](#future-idea
   - `ets::physics`: materials and field formulations;
   - `ets::solvers`: assembly and linear solves.
 - **Simulator** `ets-sim`: a command-line tool built on the core (FR-9).
-- **Meshing**: Gmsh, run as a separate program (D-21).
+- **Meshing**: Gmsh, run as a separate program (D-21). Physical group names link a mesh to its scenario (D-35).
+- **Errors**: the public API throws exceptions for invalid input (D-36).
+
+Repository layout (D-37):
+
+```
+include/ets/{core,physics,solvers}/   public headers
+src/{core,physics,solvers}/           implementation
+apps/ets-sim/                          command-line simulator
+tests/unit/                            fast unit tests
+tests/validation/                      analytical benchmarks (NFR-7)
+benchmarks/                            performance benchmarks (NFR-10)
+examples/                              sample meshes, scenarios, Gmsh scripts
+docs/                                  physics notes and Doxygen config
+```
 
 ## Technical plan
 
@@ -150,10 +178,16 @@ Each library must be recommended, described and approved before use (D-6). Only 
 | [GoogleTest](https://github.com/google/googletest) (incl. GoogleMock) | Unit, parameterised and validation tests | Tests only | BSD-3-Clause | 2026-11-24 |
 | [toml++](https://github.com/marzer/tomlplusplus) | Parsing TOML scenario files | `ets-sim` only | MIT | 2026-11-24 |
 | [CLI11](https://github.com/CLIUtils/CLI11) | Command-line options and subcommands | `ets-sim` only | BSD-3-Clause | 2026-11-24 |
+| [Google Benchmark](https://github.com/google/benchmark) | Timing assembly and solve phases (NFR-10) | `benchmarks/` only | Apache-2.0 | 2026-11-24 |
 
 Tools and compiler features (not linked libraries): Gmsh (separate program, D-21), OpenMP (compiler feature, D-27), Doxygen (D-23), clang-tidy and clang-format (D-9), llvm-cov (D-7).
 
 ## Environments
+
+- **CI**: GitHub Actions running in a pinned Docker image with GCC 13+, Clang 17+, clang-tidy, clang-format and llvm-cov (D-39).
+- **Local development**: the same image as a dev container, so builds, lint and coverage match CI.
+- **Nightly**: a scheduled job on `main` runs full refinement studies and performance benchmarks (D-38).
+- **Docs**: Doxygen output published to GitHub Pages from `main` (D-30).
 
 ## Engineering workflow
 
@@ -174,7 +208,7 @@ Every pull request to `main` must pass these checks before it can merge (NFR-6).
 | `lint` | Runs clang-tidy and checks formatting with clang-format (D-9) | Any issue is reported |
 
 - The coverage threshold is enforced inside the workflow, not by the ruleset. The ruleset only sees whether the `coverage` check passed.
-- The test framework is still to be chosen and approved (D-6).
+- Tests use GoogleTest. Unit and validation tests both run on every PR and count toward coverage (D-38).
 - Ruleset setup (**Settings → Rules → Rulesets**, targeting the default branch):
   - Require a pull request before merging, with 0 required approvals. PRs opened from Claude sessions are authored as the repo owner, who can't approve their own PR; the owner merging is the approval.
   - Restrict deletions and block force pushes.
@@ -187,6 +221,16 @@ Every pull request to `main` must pass these checks before it can merge (NFR-6).
 ## Code style & conventions
 
 ### Code
+
+- C++20 (D-10).
+- Naming (D-40), enforced by clang-tidy's `readability-identifier-naming`:
+  - types: `PascalCase`;
+  - functions and variables: `camelCase`;
+  - private members: leading underscore, e.g. `_value`. The next character must be lowercase: an underscore followed by a capital letter is reserved by the C++ standard;
+  - constants: `SCREAMING_CASE`.
+- Formatting: clang-format, LLVM style, 100-column limit (D-40).
+- SI units, documented on every parameter and return value (NFR-9).
+- Invalid input to the public API throws an exception (D-36).
 
 ### Tests
 
