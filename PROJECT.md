@@ -119,6 +119,8 @@ These are out of scope for v1. Most are listed under [Future ideas](#future-idea
 | D-44 | Renovate keeps pinned versions (CMake, Docker image, GitHub Actions) up to date; each update is a PR that must pass every gate. | Dependabot can't read CMake pins. |
 | D-45 | No outside contributions for now; `CONTRIBUTING.md` comes when the API stabilises. | A contribution process needs a stable API to contribute to. |
 | D-46 | Releases are 0.x at milestone boundaries, starting with 0.1 after milestone 3. 1.0 comes when FR-1 to FR-10 are implemented and validated; the API is then frozen under Semantic Versioning. | 0.x signals an unstable API; 1.0 marks all requirements met. |
+| D-47 | Only `.geo` scripts are committed; CI generates `.msh` files with the pinned Gmsh and caches them by script content and Gmsh version. Exception: a few tiny hand-checked `.msh` fixtures for the `.msh` reader's unit tests. | Meshing coarse models takes under a second, while committed meshes (0.4–14 MB each) would bloat git history; a script and its mesh can't drift apart. |
+| D-48 | D-33 (tree–cotree gauge) is the default, but is re-checked with benchmarks at milestone 5 against leaving A ungauged with a consistent right-hand side and the AMS preconditioner. | The ungauged route often converges faster; decide with numbers. |
 
 ## Physics & modelling
 
@@ -140,6 +142,10 @@ These are out of scope for v1. Most are listed under [Future ideas](#future-idea
 
 - **Finite element method** on tetrahedral meshes (D-14), first-order elements in v1 (D-15).
 - **Linear solvers:** Eigen's built-in direct and iterative solvers to start; a dedicated preconditioner only if benchmarks show the need (D-32).
+- **Candidate preconditioner: hypre (not approved).** [hypre](https://github.com/hypre-space/hypre) is Lawrence Livermore National Laboratory's library of scalable preconditioners, dual-licensed MIT / Apache-2.0. Two parts are relevant:
+  - **BoomerAMG**, algebraic multigrid for scalar problems (electrostatics, steady current flow). Plain CG needs more iterations as the mesh is refined; multigrid keeps the iteration count nearly constant, so solve time grows roughly in proportion to problem size.
+  - **AMS** (Auxiliary-space Maxwell Solver), for curl–curl problems on first-order edge elements (magnetostatics, eddy currents). Generic multigrid fails here because of the huge gradient null space (the freedom the gauge removes). AMS splits the error into a gradient part and a remaining part, maps each onto auxiliary nodal problems that BoomerAMG solves well, and needs only the discrete gradient matrix (edges to nodes) and the node coordinates. It handles non-conducting regions and ungauged systems.
+  - Costs: a compiled C library (can be built without MPI), and matrices must be converted to hypre's format. Proposed for approval only if milestone 5–8 benchmarks justify it (D-32, D-48).
 - **Why a volume mesh is always needed.** Scripted geometry and STEP files describe surfaces exactly, but the unknown fields exist throughout the volumes (inside conductors and in the surrounding media). FEM breaks each volume into tetrahedra and integrates over each one with numerical quadrature. The exact surfaces define where material regions meet, and the mesher places element faces on them. First-order tetrahedra approximate curved surfaces with flat facets; this geometric error shrinks as the mesh is refined, and higher-order (curved) elements remove most of it later.
 
 ### Validation & verification
@@ -148,6 +154,7 @@ These are out of scope for v1. Most are listed under [Future ideas](#future-idea
 - Each benchmark states its error tolerance and checks that the error decreases as the mesh is refined.
 - A test shows the error caused by the air box falling as the box grows (D-34).
 - PRs run validation on coarse meshes; the nightly job runs full refinement studies (D-38).
+- Validation meshes are generated in CI from committed `.geo` scripts and cached (D-47).
 
 ## Architecture
 
