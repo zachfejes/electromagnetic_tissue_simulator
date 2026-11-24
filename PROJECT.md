@@ -97,6 +97,13 @@ These are out of scope for v1. Most are listed under [Future ideas](#future-idea
 | D-22 | Target: up to about one million unknowns on one workstation, in minutes, multithreaded, with a benchmark suite (NFR-10). | Realistic coils and layered geometries without a cluster; sets the linear-solver requirements. |
 | D-23 | API docs are generated with Doxygen; undocumented public items fail CI; physics code documents its governing equations (NFR-5). | Keeps "documented" from slipping, and explains why the code does what it does. |
 | D-24 | C++ namespace `ets`; CMake targets `ets::core`, `ets::physics`, `ets::solvers`; command-line tool `ets-sim`. | Short and consistent. |
+| D-25 | Scenario files are TOML. | Comments and forgiving hand-editing; scenarios are mostly written by hand. |
+| D-26 | VTK output (`.vtu`) is written by our own code, not the VTK library. | A few hundred testable lines instead of a huge dependency. |
+| D-27 | CPU multithreading uses OpenMP. The linear-solver and assembly back ends sit behind interfaces, and the public API does not expose Eigen or OpenMP types. | No extra dependency; the interfaces keep a GPU back end possible later. |
+| D-28 | Dependencies: use an installed copy if found, otherwise download a pinned version with CMake FetchContent. | Consumers can supply their own copies; a fresh clone builds with no setup. |
+| D-29 | Semantic Versioning, with a `CHANGELOG.md` whose every release has a Capabilities section (element order, physics features, validated benchmarks). | Signals breaking changes to library users and satisfies NFR-11. |
+| D-30 | Doxygen docs, with equations rendered by MathJax, are published to GitHub Pages from `main`. | Equations are far easier to read rendered. |
+| D-31 | One short-lived branch per change (`feat/`, `fix/`, `docs/`, `chore/`), merged by squash. | One readable commit per change on `main`. |
 
 ## Physics & modelling
 
@@ -135,13 +142,25 @@ These are out of scope for v1. Most are listed under [Future ideas](#future-idea
 
 ### Approved dependencies
 
-None yet. Each library must be recommended, described and approved before use (D-6).
+Each library must be recommended, described and approved before use (D-6). Only the libraries below are approved.
+
+| Library | Purpose | Used by | License | Approved |
+|---|---|---|---|---|
+| [Eigen](https://eigen.tuxfamily.org) | Dense and sparse linear algebra; built-in iterative and direct sparse solvers | Core libraries | MPL-2.0 (unmodified use is fine under Apache-2.0) | 2026-11-24 |
+| [GoogleTest](https://github.com/google/googletest) (incl. GoogleMock) | Unit, parameterised and validation tests | Tests only | BSD-3-Clause | 2026-11-24 |
+| [toml++](https://github.com/marzer/tomlplusplus) | Parsing TOML scenario files | `ets-sim` only | MIT | 2026-11-24 |
+| [CLI11](https://github.com/CLIUtils/CLI11) | Command-line options and subcommands | `ets-sim` only | BSD-3-Clause | 2026-11-24 |
+
+Tools and compiler features (not linked libraries): Gmsh (separate program, D-21), OpenMP (compiler feature, D-27), Doxygen (D-23), clang-tidy and clang-format (D-9), llvm-cov (D-7).
 
 ## Environments
 
 ## Engineering workflow
 
 ### Branching
+
+- One short-lived branch per change, named `feat/…`, `fix/…`, `docs/…` or `chore/…` (D-31).
+- Every change reaches `main` through a pull request, merged by squash.
 
 ### CI gates on pull requests
 
@@ -193,3 +212,4 @@ Every pull request to `main` must pass these checks before it can merge (NFR-6).
 - Package-manager listings (vcpkg, Conan).
 - macOS and Windows CI.
 - An interactive viewer or GUI.
+- GPU acceleration (e.g. CUDA, HIP, SYCL or OpenMP offload; GPU sparse solvers) as an alternative back end behind the solver and assembly interfaces (D-27).
